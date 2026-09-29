@@ -153,7 +153,7 @@ The mixin keeps one flag, "properties changed", for the whole object:
 
 1. `__invalidateProperties__()` sets the flag and, unless an update is already waiting, adds an `enterFrame` listener.
 2. On the next frame, `__validate__()` runs: if the flag is set, it clears it, calls `__commitProperties__()` and then `onUpdate`. Then it removes the listener.
-3. A value set inside `__commitProperties__()` or `onUpdate` sets the flag again, but gets no update of its own: it waits until something else asks for one (see [Known Issues](#known-issues)).
+3. A value set inside `__commitProperties__()` or `onUpdate` sets the flag again: the listener stays, and that value is committed on the following frame. (So a `__commitProperties__()` that sets a value through a setter every time commits on every frame.)
 
 The flag doesn't say which property changed. `__commitProperties__()` applies them all, or the class keeps its own flags (`self._points_dirty = true` in the setter) and checks them there.
 
@@ -164,7 +164,8 @@ The flag doesn't say which property changed. `__commitProperties__()` applies th
 | name | what it is |
 |---|---|
 | `LifecycleMix` | the mixin: a parent class for `newClass()` |
-| `patch( obj )` | meant to add the lifecycle to an existing object; broken, see [Known Issues](#known-issues) |
+| `VERSION` | the version, e.g. `'0.1.1'` |
+| `patch( obj )` | adds the lifecycle to a plain table and returns it (a new one if `obj` is `nil`); see [Patching a Plain Table](#patching-a-plain-table) |
 
 ### Methods a Class Calls or Overrides
 
@@ -175,8 +176,8 @@ The flag doesn't say which property changed. `__commitProperties__()` applies th
 | `__invalidateProperties__()` | marks the object as changed and asks for an update on the next frame |
 | `__commitProperties__()` | override: apply the changed values. The mixin's does nothing |
 | `__invalidateNextFrame__()` | asks for an update without marking the object as changed; `__commitProperties__()` isn't called unless something else marks it |
-| `__validate__()` | runs the update now instead of on the next frame: commits if changed, then stops listening to frames |
-| `__dispatchInvalidateNotification__( property, value )` | calls `onProperty` with `{ name=self.EVENT, type=self.PROPERTY_UPDATED, property=property, value=value }` |
+| `__validate__()` | runs the update now instead of on the next frame: commits if changed, then stops listening to frames unless the commit changed something again |
+| `__dispatchInvalidateNotification__( property, value )` | calls `onProperty` with `{ name=self.EVENT, type=self.PROPERTY_UPDATED, target=self, property=property, value=value }` |
 | `resetLifecycle( params )` | clears the state and the callbacks; `__init__` calls it |
 | `setDebug( on )` | turns debug output on or off |
 
@@ -191,23 +192,38 @@ The flag doesn't say which property changed. `__commitProperties__()` applies th
 
 `onUpdate` and `onProperty` hold one function each; they aren't sent through `dispatchEvent()`, so `addEventListener()` doesn't receive them. The events' `name` is the object's `EVENT`, set by `ObjectBase`.
 
+### Patching a Plain Table
+
+`patch()` gives a table that isn't a lua-class object the same lifecycle. A plain table has no setters, so `onUpdate` and `onProperty` are methods there, and the table defines its own `__commitProperties__()`:
+
+```lua
+local LM = require 'dmc_corona.dmc_lifecycle_mix'
+
+local label = LM.patch( { text="" } )
+
+function label:__commitProperties__()
+	print( "redraw", self.text )
+end
+
+label:onUpdate( function( event ) print( event.type ) end )
+
+label.text = "hello"
+label:__invalidateProperties__()  -- commits on the next frame
+```
+
+Call `label:__undoInit__()` when done with it, to stop a waiting update.
+
 ## Configuration
 
 dmc-lifecycle-mixin has no settings: `dmc_corona.cfg` needs no section for it, only the `[DMC_CORONA]` section that tells the loader where the libraries are. See [dmc-corona-boot Configuration](https://github.com/dmccuskey/dmc-corona-boot/blob/master/docs/configuration.md).
 
 ## Known Issues
 
-- **`patch()` raises an error**: `assertion failed!` in `resetLifecycle()`, which checks for `__enterFrame__` before `patch()` has copied it. It would also fail after that: a plain table has no `__setters`, and `patch()` doesn't copy `__stopUpdate`, `onUpdate`, `resetLifecycle` or `__dispatchInvalidateNotification__`. Use `LifecycleMix` in a class.
-- **A change made during an update is held back**: a setter called from `__commitProperties__()` or `onUpdate` marks the object as changed, but `__validate__()` then stops listening to frames, so that change is committed only when the next `__invalidateProperties__()` comes. Set the values directly there, not through setters.
-- It works only in a lua-class object: `resetLifecycle()` writes the `onUpdate` setter into `self.__setters`.
-- `onProperty`'s event has no `target`.
-- Debug output is one message, in `resetLifecycle()`.
-- Unlike the other DMC Solar2D libraries, `dmc_lifecycle_mix.lua` doesn't load the boot loader; code that uses lua-objects from `dmc_corona/` needs `require 'dmc_corona_boot'` first, as in the Quick Start.
-- Its version (`0.1.0`) isn't available to code.
+- Debug output is one message, in `resetLifecycle()` ([#1](https://github.com/dmccuskey/dmc-lifecycle-mixin/issues/1)).
 
 ## Development
 
-Only `dmc_corona/dmc_lifecycle_mix.lua` is written in this repository; it needs no other module. Everything else is a generated copy, for the classes that use the mixin; fix it in its own repository, then rebuild:
+Only `dmc_corona/dmc_lifecycle_mix.lua` and `tests/` are written in this repository; the mixin needs no other module. Everything else is a generated copy, for the classes that use the mixin; fix it in its own repository, then rebuild:
 
 | file | owner |
 |---|---|
@@ -220,7 +236,13 @@ The copies are made by Snakemake from sibling checkouts of the repositories abov
 snakemake --cores 1 build_all
 ```
 
-dmc-lifecycle-mixin has no tests. The Quick Start is the check that it works in Solar2D.
+The unit tests run with plain Lua 5.1, no Solar2D needed (a stand-in `Runtime` runs the frames), from the repository's root folder:
+
+```sh
+tests/run_unit.sh
+```
+
+They use [Luna Test](https://github.com/silentbicycle/lunatest) (`tests/lunatest.lua`, a copy). The Quick Start is the check that it works in Solar2D. Changes are listed in the [CHANGELOG](CHANGELOG.md).
 
 ## License
 
