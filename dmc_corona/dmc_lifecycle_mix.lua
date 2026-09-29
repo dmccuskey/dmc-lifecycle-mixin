@@ -1,7 +1,7 @@
 --====================================================================--
 -- dmc_coroan/dmc_lifecycle_mix.lua
 --
--- Documentation: http://docs.davidmccuskey.com/
+-- Documentation: https://github.com/dmccuskey/dmc-lifecycle-mixin
 --====================================================================--
 
 --[[
